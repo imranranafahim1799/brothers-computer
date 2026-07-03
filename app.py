@@ -2,6 +2,11 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+import io
 
 # --- Page Config ---
 st.set_page_config(page_title="Brothers Computer", page_icon="🖥️", layout="wide")
@@ -18,6 +23,43 @@ def init_db():
 
 conn, cursor = init_db()
 
+# --- Helper Function: Generate PDF ---
+def generate_pdf(title, headers, rows):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'), alignment=1)
+    meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.gray, alignment=1)
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=10, leading=12)
+    
+    # Header
+    story.append(Paragraph("<b>Brothers Computer Management System</b>", title_style))
+    story.append(Paragraph(f"Report: {title} | Generated on: {datetime.today().strftime('%Y-%m-%d %H:%M')}", meta_style))
+    story.append(Spacer(1, 20))
+    
+    # Table Data Preparation
+    table_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in headers]]
+    for row in rows:
+        table_data.append([Paragraph(str(item), cell_style) for item in row])
+        
+    t = Table(table_data, colWidths=[doc.width/len(headers)]*len(headers))
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F3F4F6')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('TOPPADDING', (0,0), (-1,0), 8),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#FAFAFA')])
+    ]))
+    
+    story.append(t)
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 # --- Login System ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -25,10 +67,8 @@ if 'logged_in' not in st.session_state:
 def login():
     st.title("🖥️ Brothers Computer Management System")
     st.subheader("অনলাইন লগইন প্যানেল")
-    
     username = st.text_input("ইউজারনেম (Username)")
     password = st.text_input("পাসওয়ার্ড (Password)", type="password")
-    
     if st.button("লগইন করুন"):
         if username == "brothers" and password == "12345":
             st.session_state['logged_in'] = True
@@ -40,10 +80,9 @@ def login():
 if not st.session_state['logged_in']:
     login()
 else:
-    # Sidebar Navigation
     st.sidebar.title("Brothers Computer")
     st.sidebar.write("---")
-    menu = st.sidebar.radio("মেনু সিলেক্ট করুন", ["🏠 ড্যাশবোর্ড ও রিপোর্ট", "💰 বিক্রি (Sales)", "🏦 লোন ম্যানেজার", "💸 খরচ (Expense)", "💾 ব্যাকআপ ও এক্সপোর্ট"])
+    menu = st.sidebar.radio("মেনু সিলেক্ট করুন", ["🏠 ড্যাশবোর্ড ও রিপোর্ট", "💰 বিক্রি (Sales)", "🏦 লোন ম্যানেজার", "💸 খরচ (Expense)", "💾 ডাউনলোড ও এক্সপোর্ট"])
     
     if st.sidebar.button("লগআউট (Logout)"):
         st.session_state['logged_in'] = False
@@ -52,19 +91,15 @@ else:
     # --- 1. Dashboard ---
     if menu == "🏠 ড্যাশবোর্ড ও রিপোর্ট":
         st.title("🏠 ড্যাশবোর্ড ও রিপোর্ট")
-        
         current_date = datetime.today().strftime('%Y-%m-%d')
         target_date = st.text_input("তারিখ দিয়ে হিসাব দেখুন (YYYY-MM-DD):", current_date)
         
         cursor.execute("SELECT SUM(amount) FROM sales WHERE date=?", (target_date,))
         date_sales = cursor.fetchone()[0] or 0
-        
         cursor.execute("SELECT SUM(amount) FROM expenses WHERE date=?", (target_date,))
         date_expense = cursor.fetchone()[0] or 0
-        
         net_profit = date_sales - date_expense
         current_month = target_date[:7]
-        
         cursor.execute("SELECT SUM(amount) FROM sales WHERE date LIKE ?", (f"{current_month}%",))
         monthly_sales = cursor.fetchone()[0] or 0
 
@@ -77,7 +112,7 @@ else:
     # --- 2. Sales ---
     elif menu == "💰 বিক্রি (Sales)":
         st.title("💰 নতুন বিক্রি এন্ট্রি")
-        options = ["ফটোকپی", "প্রিন্ট", "কম্পোজ", "অনলাইন", "NID", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "স্মার্ট কার্ড", "অন্যান্য"]
+        options = ["Photocopy", "Print", "Compose", "Online Work", "NID Service", "Birth Registration", "Photo", "Lamination", "Smart Card", "Others"]
         item = st.selectbox("কাজের ধরন", options)
         amount = st.number_input("টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
         
@@ -88,22 +123,19 @@ else:
                 conn.commit()
                 st.success(f"{item} বাবদ ৳{amount} বিক্রি সফলভাবে সংরক্ষিত হয়েছে।")
                 st.rerun()
-            else:
-                st.error("টাকার পরিমাণ অবশ্যই ০ থেকে বেশি হতে হবে।")
         
         st.write("---")
-        st.subheader("📋 আজকের বিক্রির তালিকা (ভুল হলে মুছুন)")
+        st.subheader("📋 আজকের বিক্রির তালিকা")
         today_date = datetime.today().strftime('%Y-%m-%d')
-        df_today_sales = pd.read_sql_query("SELECT id, item AS 'কাজের ধরন', amount AS 'টাকা' FROM sales WHERE date=?", conn, params=(today_date,))
+        df_today_sales = pd.read_sql_query("SELECT id, item, amount FROM sales WHERE date=?", conn, params=(today_date,))
         
         if not df_today_sales.empty:
             for index, row in df_today_sales.iterrows():
                 col_text, col_btn = st.columns([4, 1])
-                col_text.write(f"🔹 {row['কাজের ধরন']} - ৳ {row['টাকা']}")
+                col_text.write(f"🔹 {row['item']} - ৳ {row['amount']}")
                 if col_btn.button(f"❌ Delete", key=f"del_sale_{row['id']}"):
                     cursor.execute("DELETE FROM sales WHERE id=?", (int(row['id']),))
                     conn.commit()
-                    st.success("বিক্রিটি মুছে ফেলা হয়েছে!")
                     st.rerun()
         else:
             st.info("আজকে এখনো কোনো বিক্রি এন্ট্রি করা হয়নি।")
@@ -111,9 +143,8 @@ else:
     # --- 3. Loan Manager ---
     elif menu == "🏦 লোন ম্যানেজার":
         st.title("🏦 এনজিও লোন ও কিস্তি ম্যানেজার")
-        
         col1, col2, col3 = st.columns(3)
-        ngo = col1.text_input("এনজিওর নাম")
+        ngo = col1.text_input("এনজিওর নাম (English)")
         total = col2.number_input("মোট ঋণ (৳)", min_value=0.0)
         paid = col3.number_input("পরিশোধিত (৳)", min_value=0.0)
         
@@ -144,7 +175,6 @@ else:
                 if col_btn.button(f"❌ Delete", key=f"del_loan_{l_id}"):
                     cursor.execute("DELETE FROM loans WHERE id=?", (l_id,))
                     conn.commit()
-                    st.success(f"{l_name} এর লোন মুছে ফেলা হয়েছে!")
                     st.rerun()
         else:
             st.info("কোনো লোনের তথ্য নেই।")
@@ -152,7 +182,7 @@ else:
     # --- 4. Expense ---
     elif menu == "💸 খরচ (Expense)":
         st.title("💸 দোকান খরচ এন্ট্রি")
-        options = ["দোকান ভাড়া", "বিদ্যুৎ বিল", "ইন্টারনেট বিল", "চা-নাস্তা", "অন্যান্য"]
+        options = ["Rent", "Electricity Bill", "Internet Bill", "Snacks/Tea", "Others"]
         cat = st.selectbox("খরচের খাত", options)
         amount = st.number_input("খরচের পরিমাণ (৳)", min_value=0.0, step=10.0)
         
@@ -165,29 +195,60 @@ else:
                 st.rerun()
         
         st.write("---")
-        st.subheader("📋 আজকের খরচের তালিকা (ভুল হলে মুছুন)")
+        st.subheader("📋 আজকের খরচের তালিকা")
         today_date = datetime.today().strftime('%Y-%m-%d')
-        df_today_exp = pd.read_sql_query("SELECT id, category AS 'খাত', amount AS 'টাকা' FROM expenses WHERE date=?", conn, params=(today_date,))
+        df_today_exp = pd.read_sql_query("SELECT id, category, amount FROM expenses WHERE date=?", conn, params=(today_date,))
         
         if not df_today_exp.empty:
             for index, row in df_today_exp.iterrows():
                 col_text, col_btn = st.columns([4, 1])
-                col_text.write(f"🔸 {row['খাত']} - ৳ {row['টাকা']}")
+                col_text.write(f"🔹 {row['category']} - ৳ {row['amount']}")
                 if col_btn.button(f"❌ Delete", key=f"del_exp_{row['id']}"):
                     cursor.execute("DELETE FROM expenses WHERE id=?", (int(row['id']),))
                     conn.commit()
-                    st.success("খরচটি মুছে ফেলা হয়েছে!")
                     st.rerun()
         else:
             st.info("আজকে এখনো কোনো খরচ এন্ট্রি করা হয়নি।")
 
-    # --- 5. Backup & Export ---
-    elif menu == "💾 ব্যাকআপ ও এক্সপোর্ট":
-        st.title("💾 ডেটা ব্যাকআপ ও এক্সেল রিপোর্ট")
+    # --- 5. Download & Export (Updated) ---
+    elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
+        st.title("💾 ডেটা ডাউনলোড ও রিপোর্ট প্যানেল")
+        st.write("আপনার সমস্ত এন্ট্রি এখান থেকে পিডিএফ বা এক্সেল আকারে ডাউনলোড করতে পারবেন।")
+        st.write("---")
         
-        df_sales = pd.read_sql_query("SELECT * FROM sales", conn)
+        # 1. Sales Download
+        st.subheader("💰 বিক্রির রিপোর্ট (Sales Report)")
+        df_sales = pd.read_sql_query("SELECT date AS 'Date', item AS 'Item', amount AS 'Amount' FROM sales", conn)
         if not df_sales.empty:
-            excel_data = df_sales.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📊 Excel (CSV) হিসেবে সেলস রিপোর্ট ডাউনলোড করুন", data=excel_data, file_name='sales_report.csv', mime='text/csv')
+            col1, col2 = st.columns(2)
+            col1.download_button("📊 Excel (Sales) ডাউনলোড করুন", data=df_sales.to_csv(index=False).encode('utf-8'), file_name='sales_report.csv', mime='text/csv')
+            sales_pdf = generate_pdf("Sales Report", ["Date", "Item", "Amount"], df_sales.values.tolist())
+            col2.download_button("📄 PDF (Sales) ডাউনলোড করুন", data=sales_pdf, file_name='sales_report.pdf', mime='application/pdf')
         else:
-            st.info("ডাউনলোড করার মতো কোনো বিক্রি ডেটা এখনো নেই।")
+            st.info("বিক্রির কোনো ডেটা নেই।")
+            
+        st.write("---")
+        
+        # 2. Expenses Download
+        st.subheader("💸 খরচের রিপোর্ট (Expense Report)")
+        df_exp = pd.read_sql_query("SELECT date AS 'Date', category AS 'Category', amount AS 'Amount' FROM expenses", conn)
+        if not df_exp.empty:
+            col1, col2 = st.columns(2)
+            col1.download_button("📊 Excel (Expenses) ডাউনলোড করুন", data=df_exp.to_csv(index=False).encode('utf-8'), file_name='expense_report.csv', mime='text/csv')
+            exp_pdf = generate_pdf("Expense Report", ["Date", "Category", "Amount"], df_exp.values.tolist())
+            col2.download_button("📄 PDF (Expenses) ডাউনলোড করুন", data=exp_pdf, file_name='expense_report.pdf', mime='application/pdf')
+        else:
+            st.info("খরচের কোনো ডেটা নেই।")
+            
+        st.write("---")
+        
+        # 3. Loans Download
+        st.subheader("🏦 লোনের রিপোর্ট (Loan Report)")
+        df_loans = pd.read_sql_query("SELECT ngo_name AS 'NGO Name', total_loan AS 'Total Loan', paid_loan AS 'Paid Loan', date AS 'Last Update' FROM loans", conn)
+        if not df_loans.empty:
+            col1, col2 = st.columns(2)
+            col1.download_button("📊 Excel (Loans) ডাউনলোড করুন", data=df_loans.to_csv(index=False).encode('utf-8'), file_name='loan_report.csv', mime='text/csv')
+            loan_pdf = generate_pdf("Loan Report", ["NGO Name", "Total Loan", "Paid Loan", "Last Update"], df_loans.values.tolist())
+            col2.download_button("📄 PDF (Loans) ডাউনলোড করুন", data=loan_pdf, file_name='loan_report.pdf', mime='application/pdf')
+        else:
+            st.info("লোনের কোনো ডেটা নেই।")
