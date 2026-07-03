@@ -25,6 +25,7 @@ conn, cursor = init_db()
 
 # --- Helper Function: Clean Text for PDF ---
 def clean_for_pdf(text):
+    # বাংলা ইনপুটগুলোকে ইংরেজিতে কনভার্ট করা যাতে পিডিএফে ঘর ঘর না আসে
     mapping = {
         "ফটোকপি": "Photocopy", "প্রিন্ট": "Print", "কম্পোজ": "Compose", 
         "অনলাইন": "Online Work", "NID": "NID Service", "জন্ম নিবন্ধন": "Birth Reg", 
@@ -34,7 +35,7 @@ def clean_for_pdf(text):
     }
     return mapping.get(str(text), str(text))
 
-# --- Helper Function: Generate All-in-One PDF ---
+# --- Helper Function: Generate All-in-One PDF (Fix: Removed Bengali) ---
 def generate_master_pdf(sales_rows, expense_rows, loan_rows):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -62,8 +63,8 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows):
         ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F8FAFC')])
     ])
 
-    # 1. Sales Table
-    story.append(Paragraph("<b>1. Sales Records (বিক্রি হিসাব)</b>", section_style))
+    # 1. Sales Table (বাংলা মুক্ত হেডিং)
+    story.append(Paragraph("<b>1. Sales Records</b>", section_style))
     sales_headers = ["Date", "Item", "Amount (Tk)"]
     sales_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in sales_headers]]
     for row in sales_rows:
@@ -72,8 +73,8 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows):
     t1.setStyle(t_style)
     story.append(t1)
     
-    # 2. Expense Table
-    story.append(Paragraph("<b>2. Expense Records (খরচ হিসাব)</b>", section_style))
+    # 2. Expense Table (বাংলা মুক্ত হেডিং)
+    story.append(Paragraph("<b>2. Expense Records</b>", section_style))
     exp_headers = ["Date", "Category", "Amount (Tk)"]
     exp_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in exp_headers]]
     for row in expense_rows:
@@ -82,8 +83,8 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows):
     t2.setStyle(t_style)
     story.append(t2)
     
-    # 3. Loan Table
-    story.append(Paragraph("<b>3. Loan Records (লোন হিসাব)</b>", section_style))
+    # 3. Loan Table (বাংলা মুক্ত হেডিং)
+    story.append(Paragraph("<b>3. Loan Records</b>", section_style))
     loan_headers = ["NGO Name", "Total Loan", "Paid Loan", "Last Update"]
     loan_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in loan_headers]]
     for row in loan_rows:
@@ -110,7 +111,7 @@ def login():
             st.session_state['logged_in'] = True
             st.rerun()
         else:
-            st.error("ভুল ইউজারনেম অথবা পাসওয়ার্ড!")
+            st.error("ভুল ইউজারনেম अथवा পাসওয়ার্ড!")
 
 # --- Main Application ---
 if not st.session_state['logged_in']:
@@ -246,7 +247,7 @@ else:
         else:
             st.info("আজকে এখনো কোনো খরচ এন্ট্রি করা হয়নি।")
 
-    # --- 5. Download & Export (All-in-One) ---
+    # --- 5. Download & Export ---
     elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
         st.title("💾 মাস্টার রিপোর্ট ডাউনলোড প্যানেল")
         st.write("আলাদা ফাইল ডাউনলোডের ঝামেলা শেষ! এখন মাত্র ১টি ফাইল ডাউনলোড করলেই সব হিসাব একসাথে পেয়ে যাবেন।")
