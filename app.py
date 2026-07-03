@@ -23,6 +23,18 @@ def init_db():
 
 conn, cursor = init_db()
 
+# --- Helper Function: Clean Text for PDF ---
+def clean_for_pdf(text):
+    # বাংলা লেখা থাকলে তা পিডিএফে ঘর ঘর দেখায়, তাই সাময়িকভাবে সেটিকে চেনার মতো টেক্সটে রূপান্তর করা
+    mapping = {
+        "ফটোকপি": "Photocopy", "প্রিন্ট": "Print", "কম্পোজ": "Compose", 
+        "অনলাইন": "Online Work", "NID": "NID Service", "জন্ম নিবন্ধন": "Birth Reg", 
+        "ছবি": "Photo", "ল্যামিনেশন": "Lamination", "স্মার্ট কার্ড": "Smart Card", "অন্যান্য": "Others",
+        "দোকান ভাড়া": "Shop Rent", "বিদ্যুৎ বিল": "Electricity Bill", 
+        "ইন্টারনেট বিল": "Internet Bill", "চা-নাস্তা": "Tea-Snacks"
+    }
+    return mapping.get(str(text), str(text))
+
 # --- Helper Function: Generate PDF ---
 def generate_pdf(title, headers, rows):
     buffer = io.BytesIO()
@@ -42,7 +54,9 @@ def generate_pdf(title, headers, rows):
     # Table Data Preparation
     table_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in headers]]
     for row in rows:
-        table_data.append([Paragraph(str(item), cell_style) for item in row])
+        # প্রতিটি ঘরের বাংলা লেখাকে ইংরেজিতে ক্লিন করা যাতে পিডিএফ নষ্ট না হয়
+        cleaned_row = [Paragraph(clean_for_pdf(item), cell_style) for item in row]
+        table_data.append(cleaned_row)
         
     t = Table(table_data, colWidths=[doc.width/len(headers)]*len(headers))
     t.setStyle(TableStyle([
@@ -112,7 +126,7 @@ else:
     # --- 2. Sales ---
     elif menu == "💰 বিক্রি (Sales)":
         st.title("💰 নতুন বিক্রি এন্ট্রি")
-        options = ["Photocopy", "Print", "Compose", "Online Work", "NID Service", "Birth Registration", "Photo", "Lamination", "Smart Card", "Others"]
+        options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনলাইন", "NID", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "স্মার্ট কার্ড", "অন্যান্য"]
         item = st.selectbox("কাজের ধরন", options)
         amount = st.number_input("টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
         
@@ -144,7 +158,7 @@ else:
     elif menu == "🏦 লোন ম্যানেজার":
         st.title("🏦 এনজিও লোন ও কিস্তি ম্যানেজার")
         col1, col2, col3 = st.columns(3)
-        ngo = col1.text_input("এনজিওর নাম (English)")
+        ngo = col1.text_input("এনজিওর নাম (ইংরেজি অক্ষরে লিখলে পিডিএফে সুন্দর আসবে)")
         total = col2.number_input("মোট ঋণ (৳)", min_value=0.0)
         paid = col3.number_input("পরিশোধিত (৳)", min_value=0.0)
         
@@ -182,7 +196,7 @@ else:
     # --- 4. Expense ---
     elif menu == "💸 খরচ (Expense)":
         st.title("💸 দোকান খরচ এন্ট্রি")
-        options = ["Rent", "Electricity Bill", "Internet Bill", "Snacks/Tea", "Others"]
+        options = ["দোকান ভাড়া", "বিদ্যুৎ বিল", "ইন্টারনেট বিল", "চা-নাস্তা", "অন্যান্য"]
         cat = st.selectbox("খরচের খাত", options)
         amount = st.number_input("খরচের পরিমাণ (৳)", min_value=0.0, step=10.0)
         
@@ -210,7 +224,7 @@ else:
         else:
             st.info("আজকে এখনো কোনো খরচ এন্ট্রি করা হয়নি।")
 
-    # --- 5. Download & Export (Updated) ---
+    # --- 5. Download & Export ---
     elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
         st.title("💾 ডেটা ডাউনলোড ও রিপোর্ট প্যানেল")
         st.write("আপনার সমস্ত এন্ট্রি এখান থেকে পিডিএফ বা এক্সেল আকারে ডাউনলোড করতে পারবেন।")
