@@ -30,7 +30,6 @@ def login():
     password = st.text_input("পাসওয়ার্ড (Password)", type="password")
     
     if st.button("লগইন করুন"):
-        # আপনার পছন্দমত ইউজারনেম ও পাসওয়ার্ড এখানে পরিবর্তন করতে পারেন
         if username == "brothers" and password == "12345":
             st.session_state['logged_in'] = True
             st.rerun()
@@ -54,11 +53,9 @@ else:
     if menu == "🏠 ড্যাশবোর্ড ও রিপোর্ট":
         st.title("🏠 ড্যাশবোর্ড ও রিপোর্ট")
         
-        # Date Filter
         current_date = datetime.today().strftime('%Y-%m-%d')
         target_date = st.text_input("তারিখ দিয়ে হিসাব দেখুন (YYYY-MM-DD):", current_date)
         
-        # Fetch Data
         cursor.execute("SELECT SUM(amount) FROM sales WHERE date=?", (target_date,))
         date_sales = cursor.fetchone()[0] or 0
         
@@ -71,7 +68,6 @@ else:
         cursor.execute("SELECT SUM(amount) FROM sales WHERE date LIKE ?", (f"{current_month}%",))
         monthly_sales = cursor.fetchone()[0] or 0
 
-        # Display Cards
         col1, col2, col3, col4 = st.columns(4)
         col1.metric(f"📅 {target_date} এর বিক্রি", f"৳ {date_sales}")
         col2.metric(f"💸 {target_date} এর খরচ", f"৳ {date_expense}")
@@ -81,7 +77,7 @@ else:
     # --- 2. Sales ---
     elif menu == "💰 বিক্রি (Sales)":
         st.title("💰 নতুন বিক্রি এন্ট্রি")
-        options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনলাইন", "NID", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "স্মার্ট কার্ড", "অন্যান্য"]
+        options = ["ফটোকپی", "প্রিন্ট", "কম্পোজ", "অনলাইন", "NID", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "স্মার্ট কার্ড", "অন্যান্য"]
         item = st.selectbox("কাজের ধরন", options)
         amount = st.number_input("টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
         
@@ -91,8 +87,26 @@ else:
                 cursor.execute("INSERT INTO sales (item, amount, date) VALUES (?, ?, ?)", (item, amount, today))
                 conn.commit()
                 st.success(f"{item} বাবদ ৳{amount} বিক্রি সফলভাবে সংরক্ষিত হয়েছে।")
+                st.rerun()
             else:
                 st.error("টাকার পরিমাণ অবশ্যই ০ থেকে বেশি হতে হবে।")
+        
+        st.write("---")
+        st.subheader("📋 আজকের বিক্রির তালিকা (ভুল হলে মুছুন)")
+        today_date = datetime.today().strftime('%Y-%m-%d')
+        df_today_sales = pd.read_sql_query("SELECT id, item AS 'কাজের ধরন', amount AS 'টাকা' FROM sales WHERE date=?", conn, params=(today_date,))
+        
+        if not df_today_sales.empty:
+            for index, row in df_today_sales.iterrows():
+                col_text, col_btn = st.columns([4, 1])
+                col_text.write(f"🔹 {row['কাজের ধরন']} - ৳ {row['টাকা']}")
+                if col_btn.button(f"❌ Delete", key=f"del_sale_{row['id']}"):
+                    cursor.execute("DELETE FROM sales WHERE id=?", (int(row['id']),))
+                    conn.commit()
+                    st.success("বিক্রিটি মুছে ফেলা হয়েছে!")
+                    st.rerun()
+        else:
+            st.info("আজকে এখনো কোনো বিক্রি এন্ট্রি করা হয়নি।")
 
     # --- 3. Loan Manager ---
     elif menu == "🏦 লোন ম্যানেজার":
@@ -113,13 +127,27 @@ else:
                     cursor.execute("INSERT INTO loans (ngo_name, total_loan, paid_loan, date) VALUES (?, ?, ?, ?)", (ngo, total, paid, today))
                 conn.commit()
                 st.success(f"{ngo} এর লোন আপডেট হয়েছে।")
+                st.rerun()
         
         st.write("---")
-        # Display Loan Table
-        df_loans = pd.read_sql_query("SELECT ngo_name AS 'এনজিও', total_loan AS 'মোট ঋণ', paid_loan AS 'পরিশোধিত' FROM loans", conn)
-        if not df_loans.empty:
-            df_loans['বাকি ঋণ'] = df_loans['মোট ঋণ'] - df_loans['পরিশোধিত']
-            st.dataframe(df_loans.style.map(lambda x: 'background-color: #4a1515; color: white' if x > 0 else '', subset=['বাকি ঋণ']), use_container_width=True)
+        st.subheader("📋 বর্তমান লোনের তালিকা")
+        cursor.execute("SELECT id, ngo_name, total_loan, paid_loan FROM loans")
+        loan_rows = cursor.fetchall()
+        
+        if loan_rows:
+            for row in loan_rows:
+                l_id, l_name, l_total, l_paid = row
+                l_due = l_total - l_paid
+                col_text, col_btn = st.columns([4, 1])
+                color_tag = "🔴" if l_due > 0 else "🟢"
+                col_text.write(f"{color_tag} **{l_name}** -> মোট ঋণ: ৳{l_total} | শোধ: ৳{l_paid} | **বাকি: ৳{l_due}**")
+                if col_btn.button(f"❌ Delete", key=f"del_loan_{l_id}"):
+                    cursor.execute("DELETE FROM loans WHERE id=?", (l_id,))
+                    conn.commit()
+                    st.success(f"{l_name} এর লোন মুছে ফেলা হয়েছে!")
+                    st.rerun()
+        else:
+            st.info("কোনো লোনের তথ্য নেই।")
 
     # --- 4. Expense ---
     elif menu == "💸 খরচ (Expense)":
@@ -134,6 +162,24 @@ else:
                 cursor.execute("INSERT INTO expenses (category, amount, date) VALUES (?, ?, ?)", (cat, amount, today))
                 conn.commit()
                 st.success(f"{cat} বাবদ ৳{amount} খরচ সংরক্ষিত হয়েছে।")
+                st.rerun()
+        
+        st.write("---")
+        st.subheader("📋 আজকের খরচের তালিকা (ভুল হলে মুছুন)")
+        today_date = datetime.today().strftime('%Y-%m-%d')
+        df_today_exp = pd.read_sql_query("SELECT id, category AS 'খাত', amount AS 'টাকা' FROM expenses WHERE date=?", conn, params=(today_date,))
+        
+        if not df_today_exp.empty:
+            for index, row in df_today_exp.iterrows():
+                col_text, col_btn = st.columns([4, 1])
+                col_text.write(f"🔸 {row['খাত']} - ৳ {row['টাকা']}")
+                if col_btn.button(f"❌ Delete", key=f"del_exp_{row['id']}"):
+                    cursor.execute("DELETE FROM expenses WHERE id=?", (int(row['id']),))
+                    conn.commit()
+                    st.success("খরচটি মুছে ফেলা হয়েছে!")
+                    st.rerun()
+        else:
+            st.info("আজকে এখনো কোনো খরচ এন্ট্রি করা হয়নি।")
 
     # --- 5. Backup & Export ---
     elif menu == "💾 ব্যাকআপ ও এক্সপোর্ট":
