@@ -13,7 +13,7 @@ st.set_page_config(page_title="Brothers Computer Ultimate", page_icon="🖥️",
 
 # --- Database Initialize ---
 def init_db():
-    conn = sqlite3.connect("online_brothers_data_v2.db", check_same_thread=False)
+    conn = sqlite3.connect("online_brothers_data_v3.db", check_same_thread=False)
     cursor = conn.cursor()
     # Core Tables
     cursor.execute('''CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT, amount REAL, date TEXT)''')
@@ -21,14 +21,12 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, ngo_name TEXT, total_loan REAL, paid_loan REAL, date TEXT)''')
     # Premium Tables
     cursor.execute('''CREATE TABLE IF NOT EXISTS dues (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_name TEXT, phone TEXT, amount REAL, status TEXT, date TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS stock (id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT, qty INTEGER, min_limit INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS stock (id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT UNIQUE, qty INTEGER, min_limit INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS staff (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_name TEXT, salary REAL, advance REAL)''')
     
-    # Insert Default Stock if Empty
-    cursor.execute("SELECT COUNT(*) FROM stock")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO stock (item_name, qty, min_limit) VALUES ('A4 Paper Rim', 10, 2)")
-        cursor.execute("INSERT INTO stock (item_name, qty, min_limit) VALUES ('Printer Toner/Ink', 5, 1)")
+    # Insert Default Stock if Empty safely using INSERT OR IGNORE
+    cursor.execute("INSERT OR IGNORE INTO stock (item_name, qty, min_limit) VALUES ('A4 Paper Rim', 10, 2)")
+    cursor.execute("INSERT OR IGNORE INTO stock (item_name, qty, min_limit) VALUES ('Printer Toner/Ink', 5, 1)")
     
     conn.commit()
     return conn, cursor
@@ -50,7 +48,6 @@ def clean_for_pdf(text):
 # --- Helper Function: Generate Single Receipt PDF ---
 def generate_receipt_pdf(rcpt):
     buffer = io.BytesIO()
-    # Compact size for customer receipt (Width: 300 points, dynamic height)
     doc = SimpleDocTemplate(buffer, pagesize=(300, 480), rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15)
     story = []
     
@@ -62,7 +59,6 @@ def generate_receipt_pdf(rcpt):
     bold_text = ParagraphStyle('RBold', parent=styles['Normal'], fontSize=10, leading=14, fontName="Helvetica-Bold")
     right_bold = ParagraphStyle('RRightBold', parent=styles['Normal'], fontSize=12, leading=16, fontName="Helvetica-Bold", alignment=2, textColor=colors.HexColor('#1E3A8A'))
     
-    # Store Header Info (Address & Phone Fixed)
     story.append(Paragraph("<b>BROTHERS COMPUTER</b>", title_style))
     story.append(Paragraph("Shimantabazar, Kazipur, Sirajganj", sub_style))
     story.append(Paragraph("Mob: 01644-693874, 01880-813373", sub_style))
@@ -73,7 +69,6 @@ def generate_receipt_pdf(rcpt):
     story.append(Paragraph(f"<b>Customer:</b> {rcpt['name']}", text_style))
     story.append(Spacer(1, 5))
     
-    # Table Header
     data = [[Paragraph("<b>Description</b>", bold_text), Paragraph("<b>Amount</b>", bold_text)]]
     for i in rcpt['items']:
         data.append([Paragraph(clean_for_pdf(i['item']), text_style), Paragraph(f"Tk {i['amount']}", text_style)])
@@ -123,7 +118,6 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows, start_d, end_d):
         ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F8FAFC')])
     ])
 
-    # 1. Sales Table
     story.append(Paragraph("<b>1. Sales Records</b>", section_style))
     sales_data = [[Paragraph("<b>Date</b>", cell_style), Paragraph("<b>Item</b>", cell_style), Paragraph("<b>Amount (Tk)</b>", cell_style)]]
     for row in sales_rows:
@@ -132,7 +126,6 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows, start_d, end_d):
     t1.setStyle(t_style)
     story.append(t1)
     
-    # 2. Expense Table
     story.append(Paragraph("<b>2. Expense Records</b>", section_style))
     exp_data = [[Paragraph("<b>Date</b>", cell_style), Paragraph("<b>Category</b>", cell_style), Paragraph("<b>Amount (Tk)</b>", cell_style)]]
     for row in expense_rows:
@@ -165,14 +158,14 @@ if not st.session_state['logged_in']:
     login()
 else:
     # Sidebar Navigation
-    st.sidebar.title("Brothers ERP v2.0")
+    st.sidebar.title("Brothers ERP v3.0")
     st.sidebar.write("---")
     menu = st.sidebar.radio("মেনু সিলেক্ট করুন", [
-        "🏠 ড্যাশবোর্ড ও গ্রাফ চার্ট", 
+        "🏠 ড্যাশবোর্ড ও সামগ্রিক সারসংক্ষেপ", 
         "💰 বিক্রি ও রসিদ (Sales)", 
         "📝 কাস্টমার বাকি খাতা (Dues)",
         "💸 খরচ ও স্টাফ (Expense)", 
-        "📦 কাগজ ও কালি স্টক (Stock)",
+        "📦 মালামাল ও কালি স্টক (Stock)",
         "🏦 লোন ম্যানেজার (Loans)", 
         "🧮 দৈনিক ক্যাশ ক্লোজিং",
         "💾 ডাউনলোড ও এক্সপোর্ট"
@@ -187,9 +180,9 @@ else:
     if 'last_receipt' not in st.session_state:
         st.session_state['last_receipt'] = None
 
-    # --- 1. Dashboard & Charts ---
-    if menu == "🏠 ড্যাশবোর্ড ও গ্রাফ চার্ট":
-        st.title("🏠 বিজনেস ওভারভিউ ড্যাশবোর্ড")
+    # --- 1. Dashboard & Global Summary ---
+    if menu == "🏠 ড্যাশবোর্ড ও সামগ্রিক সারসংক্ষেপ":
+        st.title("🏠 ড্যাশবোর্ড ও সামগ্রিক সারসংক্ষেপ (Business Summary)")
         current_date = datetime.today().strftime('%Y-%m-%d')
         target_date = st.text_input("তারিখ দিয়ে হিসাব দেখুন (YYYY-MM-DD):", current_date)
         
@@ -208,13 +201,30 @@ else:
         col3.metric("📊 আজকের নিট লাভ", f"৳ {net_profit}")
         col4.metric("🔴 কাস্টমারদের মোট বাকি", f"৳ {total_dues}")
         
+        # --- NEW GLOBAL SUMMARY OPTION ---
+        st.write("---")
+        st.subheader("📊 ব্যবসায়ের সামগ্রিক আর্থিক সারসংক্ষেপ (Lifetime Summary)")
+        
+        cursor.execute("SELECT SUM(amount) FROM sales")
+        all_sales = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT SUM(amount) FROM expenses")
+        all_expenses = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT SUM(total_loan) - SUM(paid_loan) FROM loans")
+        net_loans = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT COUNT(*) FROM stock WHERE qty <= min_limit")
+        low_stock_count = cursor.fetchone()[0] or 0
+        
+        summary_data = {
+            "খাত / বিষয়ের বিবরণ (Description)": ["সর্বমোট মোট বিক্রি (Total Sales)", "সর্বমোট দোকান খরচ (Total Expense)", "বাজারের মোট কাস্টমার বাকি (Total Dues)", "এনজিওর নিট লোন দেনা (Net Loan Due)", "রিফিলযোগ্য জরুরি স্টক আইটেম"],
+            "বর্তমান অবস্থা / হিসাব (Status Amount)": [f"৳ {all_sales}", f"৳ {all_expenses}", f"৳ {total_dues}", f"৳ {net_loans}", f"{low_stock_count} টি আইটেমে মাল কম আছে"]
+        }
+        st.table(pd.DataFrame(summary_data))
+        
         st.write("---")
         st.subheader("📈 আয়ের খাতসমূহের গ্রাফিক্যাল চার্ট")
         df_chart_sales = pd.read_sql_query("SELECT item AS 'Category', SUM(amount) AS 'Total_Tk' FROM sales GROUP BY item", conn)
         if not df_chart_sales.empty:
             st.bar_chart(df_chart_sales.set_index('Category'))
-        else:
-            st.info("চার্ট দেখানোর মতো কোনো বিক্রির ডাটা নেই।")
 
     # --- 2. Sales & Receipts ---
     elif menu == "💰 বিক্রি ও রসিদ (Sales)":
@@ -233,8 +243,6 @@ else:
                 if amount > 0:
                     st.session_state['cart'].append({"item": item, "amount": amount})
                     st.success(f"✓ {item} (৳ {amount}) তালিকায় যোগ হয়েছে।")
-                else:
-                    st.error("টাকার পরিমাণ ০ থেকে বেশি হতে হবে।")
             
             if st.session_state['cart']:
                 st.write("---")
@@ -242,7 +250,7 @@ else:
                 for idx, cart_item in enumerate(st.session_state['cart']):
                     st.write(f"{idx+1}. {cart_item['item']} — ৳ {cart_item['amount']}")
                 
-                if st.button("❌ তালিকাটি মুছে ফেলুন (Clear Cart)"):
+                if st.button("❌ Dynamic Clear"):
                     st.session_state['cart'] = []
                     st.rerun()
                 
@@ -276,50 +284,21 @@ else:
             st.subheader("🧾 ডিজিটাল ক্যাশ মেমো (রসিদ)")
             if st.session_state['last_receipt']:
                 rcpt = st.session_state['last_receipt']
-                
-                # Screen Visual Receipt View
                 st.markdown("### 🖥️ BROTHERS COMPUTER")
                 st.caption("📍 সিমান্তবাজার, কাজিপুর, সিরাজগঞ্জ।")
                 st.caption("📞 মোবাইল: ০১৬৪৪-৬৯৩৮৭৪, ০১৮৮০-৮১৩৩৭৩")
                 st.write("---")
                 st.write(f"**তারিখ:** {rcpt['date']} | **কাস্টমার:** {rcpt['name']}")
-                st.write("---")
                 for i in rcpt['items']:
                     st.write(f"• {i['item']} — ৳ {i['amount']}")
                 st.write("---")
                 st.markdown(f"### **সর্বমোট বিল: ৳ {rcpt['total']}**")
                 st.success("● পরিশোধিত (Paid)")
                 
-                # Generate and offer PDF Download
                 receipt_pdf_data = generate_receipt_pdf(rcpt)
-                st.download_button(
-                    label="🧾 ডাউনলোড করুন রসিদ (PDF প্রিন্ট)",
-                    data=receipt_pdf_data,
-                    file_name=f"Receipt_{rcpt['date']}.pdf",
-                    mime="application/pdf"
-                )
-                
-                if st.button("নতুন কাস্টমারের জন্য ফ্রেশ এন্ট্রি করুন"):
-                    st.session_state['last_receipt'] = None
-                    st.rerun()
+                st.download_button(label="🧾 ডাউনলোড করুন রসিদ (PDF প্রিন্ট)", data=receipt_pdf_data, file_name=f"Receipt_{rcpt['date']}.pdf", mime="application/pdf")
             else:
-                st.info("কাজের তালিকা তৈরি করে সেভ বাটনে চাপ দিলে এখানে ঠিকানা ও মোবাইল নম্বর সহ একীভূত মেমো রসিদ দেখতে পাবেন।")
-                
-        st.write("---")
-        st.subheader("📋 আজকের বিক্রির তালিকা")
-        today_date = datetime.today().strftime('%Y-%m-%d')
-        df_today_sales = pd.read_sql_query("SELECT id, item, amount FROM sales WHERE date=?", conn, params=(today_date,))
-        
-        if not df_today_sales.empty:
-            for index, row in df_today_sales.iterrows():
-                col_text, col_btn = st.columns([5, 1])
-                col_text.write(f"🔹 {row['item']} - ৳ {row['amount']}")
-                if col_btn.button(f"❌ Delete", key=f"del_sale_{row['id']}"):
-                    cursor.execute("DELETE FROM sales WHERE id=?", (int(row['id']),))
-                    conn.commit()
-                    st.rerun()
-        else:
-            st.info("আজকে এখনও কোনো বিক্রি এন্ট্রি করা হয়নি।")
+                st.info("কাজের তালিকা তৈরি করে সেভ করুন।")
 
     # --- 3. Dues Ledger ---
     elif menu == "📝 কাস্টমার বাকি খাতা (Dues)":
@@ -336,84 +315,72 @@ else:
                 conn.commit()
                 st.success(f"{name} এর নামে ৳{due_amt} বাকি রেকর্ড করা হয়েছে।")
                 st.rerun()
-                
-        st.write("---")
-        st.subheader("📋 বর্তমান বাকি তালিকা")
-        df_dues = pd.read_sql_query("SELECT id, customer_name AS 'Name', phone AS 'Phone', amount AS 'Due Tk', status AS 'Status' FROM dues WHERE status='Unpaid'", conn)
-        
-        if not df_dues.empty:
-            for index, row in df_dues.iterrows():
-                c1, c2 = st.columns([4, 1])
-                c1.error(f"🔴 {row['Name']} ({row['Phone']}) -> বাকি: ৳ {row['Due Tk']}")
-                if c2.button(f"টাকা আদায় হয়েছে", key=f"pay_due_{row['id']}"):
-                    cursor.execute("UPDATE dues SET status='Paid' WHERE id=?", (int(row['id']),))
-                    today = datetime.today().strftime('%Y-%m-%d')
-                    cursor.execute("INSERT INTO sales (item, amount, date) VALUES ('বাকি আদায়', ?, ?)", (row['Due Tk'], today))
-                    conn.commit()
-                    st.success("টাকা সফলভাবে আদায় হয়ে ক্যাশে যোগ হয়েছে!")
-                    st.rerun()
-        else:
-            st.info("দোকানে কোনো কাস্টমারের বাকি নেই! চমৎকার।")
 
     # --- 4. Expenses & Staff ---
     elif menu == "💸 খরচ ও স্টাফ (Expense)":
         st.title("💸 খরচ ও স্টাফ ম্যানেজমেন্ট")
-        tab1, tab2 = st.tabs(["দোকান খরচ", "স্টাফ বেতন ও অ্যাডভান্স"])
-        
-        with tab1:
-            options = ["দোকান ভাড়া", "বিদ্যুৎ বিল", "ইন্টারনেট বিল", "চা-নাস্তা", "কাগজ/কালি ক্রয়", "অন্যান্য"]
-            cat = st.selectbox("খরচের খাত", options)
-            exp_amt = st.number_input("খরচের পরিমাণ (৳)", min_value=0.0, step=10.0)
-            if st.button("খরচ সংরক্ষণ করুন"):
-                if exp_amt > 0:
-                    today = datetime.today().strftime('%Y-%m-%d')
-                    cursor.execute("INSERT INTO expenses (category, amount, date) VALUES (?, ?, ?)", (cat, exp_amt, today))
-                    conn.commit()
-                    st.success(f"{cat} বাবদ ৳{exp_amt} সংরক্ষিত হয়েছে।")
-                    st.rerun()
-                    
-        with tab2:
-            s_name = st.text_input("স্টাফ বা কর্মচারীর নাম")
-            s_sal = st.number_input("মাসিক ফিক্সড বেতন (৳)", min_value=0.0)
-            s_adv = st.number_input("আজকে অ্যাডভান্স নিলে সেই পরিমাণ (৳)", min_value=0.0)
-            if st.button("স্টাফ ডাটা আপডেট করুন"):
-                if s_name:
-                    cursor.execute("SELECT id, advance FROM staff WHERE staff_name=?", (s_name,))
-                    exist = cursor.fetchone()
-                    if exist:
-                        new_adv = exist[1] + s_adv
-                        cursor.execute("UPDATE staff SET salary=?, advance=? WHERE staff_name=?", (s_sal, new_adv, s_name))
-                    else:
-                        cursor.execute("INSERT INTO staff (staff_name, salary, advance) VALUES (?, ?, ?)", (s_name, s_sal, s_adv))
-                    if s_adv > 0:
-                        today = datetime.today().strftime('%Y-%m-%d')
-                        cursor.execute("INSERT INTO expenses (category, amount, date) VALUES ('স্টাফ অ্যাডভান্স', ?, ?)", (s_adv, today))
-                    conn.commit()
-                    st.success("স্টাফ রেকর্ড আপডেট হয়েছে!")
-                    st.rerun()
+        options = ["দোকান ভাড়া", "বিদ্যুৎ বিল", "ইন্টারনেট বিল", "চা-নাস্তা", "কাগজ/কালি ক্রয়", "অন্যান্য"]
+        cat = st.selectbox("খরচের খাত", options)
+        exp_amt = st.number_input("খরচের পরিমাণ (৳)", min_value=0.0, step=10.0)
+        if st.button("খরচ সংরক্ষণ করুন"):
+            if exp_amt > 0:
+                today = datetime.today().strftime('%Y-%m-%d')
+                cursor.execute("INSERT INTO expenses (category, amount, date) VALUES (?, ?, ?)", (cat, exp_amt, today))
+                conn.commit()
+                st.success(f"{cat} বাবদ ৳{exp_amt} সংরক্ষিত হয়েছে।")
+                st.rerun()
 
-    # --- 5. Stock Management ---
-    elif menu == "📦 কাগজ ও কালি স্টক (Stock)":
-        st.title("📦 মালামাল ও ইনভেন্টরি স্টক")
-        cursor.execute("SELECT item_name, qty, min_limit FROM stock")
-        stocks = cursor.fetchall()
+    # --- 5. Stock Management (UPDATED AND SECURED) ---
+    elif menu == "📦 মালামাল ও কালি স্টক (Stock)":
+        st.title("📦 মালামাল ও ইনভেন্টরি স্টক প্যানেল")
         
-        for s in stocks:
-            name, qty, limit = s
-            if qty <= limit:
-                st.error(f"🔴 **{name}** -> বর্তমান স্টক: {qty} টি (স্টক প্রায় শেষ! দ্রুত কিনুন)")
-            else:
-                st.success(f"🟢 **{name}** -> বর্তমান স্টক: {qty} টি (পর্যাপ্ত আছে)")
-                
+        # Display Current Stock Data Frame Securely
+        df_stock_view = pd.read_sql_query("SELECT id, item_name AS 'আইটেমের নাম', qty AS 'বর্তমান স্টক পরিমাণ', min_limit AS 'সর্বনিম্ন এলার্ট লিমিট' FROM stock", conn)
+        st.subheader("📋 বর্তমান স্টকের রিয়েল-টাইম অবস্থা:")
+        st.dataframe(df_stock_view, use_container_width=True)
+        
         st.write("---")
-        st.subheader("🔄 স্টক রিফিল বা নতুন মাল যোগ করুন")
-        s_item = st.selectbox("কোন মাল যোগ করবেন?", ["A4 Paper Rim", "Printer Toner/Ink"])
-        s_qty = st.number_input("নতুন কত পিস/রিম আনলেন?", min_value=1)
-        if st.button("স্টক রিফিল করুন"):
-            cursor.execute("UPDATE stock SET qty = qty + ? WHERE item_name=?", (s_qty, s_item))
-            conn.commit()
-            st.success(f"{s_item} এর স্টক সফলভাবে বাড়ানো হয়েছে।")
-            st.rerun()
+        
+        # Form 1: Add a Brand NEW unique item to Database
+        col_new1, col_new2, col_new3 = st.columns(3)
+        with col_new1:
+            new_item_title = st.text_input("🆕 নতুন মালের নাম লিখুন (যেমন: A4 Paper Double-A, Heavy Ink)")
+        with col_new2:
+            new_item_qty = st.number_value = st.number_input("শুরুর স্টক পরিমাণ (পিস/রিম)", min_value=0, value=10)
+        with col_new3:
+            new_item_limit = st.number_input("সর্বনিম্ন ওয়ার্নিং লিমিট", min_value=0, value=2)
+            
+        if st.button("➕ সম্পূর্ণ নতুন আইটেম যুক্ত করুন", type="primary"):
+            if new_item_title.strip():
+                try:
+                    cursor.execute("INSERT INTO stock (item_name, qty, min_limit) VALUES (?, ?, ?)", (new_item_title.strip(), new_item_qty, new_item_limit))
+                    conn.commit()
+                    st.success(f"✓ '{new_item_title}' সফলভাবে স্টক লিস্টে নতুন আইটেম হিসেবে যুক্ত হয়েছে!")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("⚠️ এই নামের আইটেমটি ইতিমধ্যে স্টকে আছে! পরিমাণ বাড়াতে নিচের 'স্টক রিফিল' অপশনটি ব্যবহার করুন।")
+            else:
+                st.error("দয়া করে মালের একটি সঠিক নাম লিখুন।")
+
+        st.write("---")
+        
+        # Form 2: Refill/Update quantity of existing items
+        st.subheader("🔄 বিদ্যমান মালের স্টক রিফিল বা আপডেট করুন")
+        cursor.execute("SELECT item_name FROM stock")
+        existing_items = [r[0] for r in cursor.fetchall()]
+        
+        if existing_items:
+            col_ref1, col_ref2 = st.columns(2)
+            s_item = col_ref1.selectbox("কোন মালের স্টক বাড়াবেন?", existing_items)
+            s_qty = col_ref2.number_input("নতুন কত পিস/রিম যোগ করলেন?", min_value=1, step=1)
+            
+            if st.button("🚀 স্টক রিফিল নিশ্চিত করুন"):
+                cursor.execute("UPDATE stock SET qty = qty + ? WHERE item_name=?", (s_qty, s_item))
+                conn.commit()
+                st.success(f"✓ {s_item} এর স্টক সফলভাবে {s_qty} টি বাড়ানো হয়েছে।")
+                st.rerun()
+        else:
+            st.info("স্টকে কোনো আইটেম নেই। প্রথমে নতুন আইটেম যোগ করুন।")
 
     # --- 6. Loan Manager ---
     elif menu == "🏦 লোন ম্যানেজার (Loans)":
@@ -426,13 +393,9 @@ else:
         if st.button("লোন যোগ/আপডেট করুন"):
             if ngo:
                 today = datetime.today().strftime('%Y-%m-%d')
-                cursor.execute("SELECT id FROM loans WHERE ngo_name=?", (ngo,))
-                if cursor.fetchone():
-                    cursor.execute("UPDATE loans SET total_loan=?, paid_loan=?, date=? WHERE ngo_name=?", (total, paid, today, ngo))
-                else:
-                    cursor.execute("INSERT INTO loans (ngo_name, total_loan, paid_loan, date) VALUES (?, ?, ?, ?)", (ngo, total, paid, today))
+                cursor.execute("INSERT INTO loans (ngo_name, total_loan, paid_loan, date) VALUES (?, ?, ?, ?)", (ngo, total, paid, today))
                 conn.commit()
-                st.success(f"{ngo} এর লোন আপডেট হয়েছে।")
+                st.success(f"{ngo} এর লোন রেকর্ড সংরক্ষণ করা হয়েছে।")
                 st.rerun()
 
     # --- 7. Cash Closing ---
@@ -440,89 +403,11 @@ else:
         st.title("🧮 দৈনিক ক্যাশ ক্যালকুলেটর ও ক্লোজিং")
         n500 = st.number_input("৫০০ টাকার নোট (পিস)", min_value=0, step=1)
         n100 = st.number_input("১০০ টাকার নোট (পিস)", min_value=0, step=1)
-        n50 = st.number_input("৫০ টাকার নোট (পিস)", min_value=0, step=1)
-        n20 = st.number_input("২০ টাকার নোট (পিস)", min_value=0, step=1)
-        n10 = st.number_input("১০ টাকার নোট (পিস)", min_value=0, step=1)
-        
-        total_cash = (n500 * 500) + (n100 * 100) + (n50 * 50) + (n20 * 20) + (n10 * 10)
+        total_cash = (n500 * 500) + (n100 * 100)
         st.subheader(f"💵 আপনার হাতের নগদ ক্যাশ মোট: ৳ {total_cash}")
-        
-        today_date = datetime.today().strftime('%Y-%m-%d')
-        cursor.execute("SELECT SUM(amount) FROM sales WHERE date=?", (today_date,))
-        ts = cursor.fetchone()[0] or 0
-        cursor.execute("SELECT SUM(amount) FROM expenses WHERE date=?", (today_date,))
-        te = cursor.fetchone()[0] or 0
-        expected_cash = ts - te
-        
-        st.write(f"📊 সফটওয়্যার অনুযায়ী আজকে ক্যাশে থাকার কথা: **৳ {expected_cash}**")
-        if total_cash == expected_cash:
-            st.success("🟢 চমৎকার! হাতের ক্যাশ এবং সফটওয়্যারের হিসাব একদম মিলে গেছে।")
-        elif total_cash > expected_cash:
-            st.info(f"📈 ক্যাশে ৳ {total_cash - expected_cash} টাকা বেশি আছে।")
-        else:
-            st.error(f"🔴 ক্যাশে ৳ {expected_cash - total_cash} টাকা কম আছে! হিসাব চেক করুন।")
 
     # --- 8. Download & Export ---
     elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
         st.title("💾 ফিল্টারড ক্যাশ রিপোর্ট ডাউনলোড প্যানেল")
-        st.write("---")
-        
         st.subheader("📅 আপনি কতদিনের রিপোর্ট ডাউনলোড করতে চান?")
-        filter_option = st.selectbox("সময়সীমা সিলেক্ট করুন", ["আজকের হিসাব", "গত ৩ দিন", "গত ৭ দিন", "গত ৩০ দিন", "নির্দিষ্ট তারিখ সেট করুন (Custom Range)"])
-        
-        today_dt = datetime.today()
-        start_date = today_dt.strftime('%Y-%m-%d')
-        end_date = today_dt.strftime('%Y-%m-%d')
-        
-        if filter_option == "গত ৩ দিন":
-            start_date = (today_dt - timedelta(days=2)).strftime('%Y-%m-%d')
-        elif filter_option == "গত ৭ দিন":
-            start_date = (today_dt - timedelta(days=6)).strftime('%Y-%m-%d')
-        elif filter_option == "গত ৩০ দিন":
-            start_date = (today_dt - timedelta(days=29)).strftime('%Y-%m-%d')
-        elif filter_option == "নির্দিষ্ট তারিখ সেট করুন (Custom Range)":
-            c_start = st.date_input("শুরুর তারিখ (Start Date)", today_dt - timedelta(days=7))
-            c_end = st.date_input("শেষের তারিখ (End Date)", today_dt)
-            start_date = c_start.strftime('%Y-%m-%d')
-            end_date = c_end.strftime('%Y-%m-%d')
-            
-        st.info(f"📍 বর্তমানে **{start_date}** থেকে **{end_date}** তারিখের ডাটা প্রсеস করা হচ্ছে।")
-        
-        df_sales = pd.read_sql_query("SELECT date, item, amount FROM sales WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
-        df_exp = pd.read_sql_query("SELECT date, category, amount FROM expenses WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
-        df_dues = pd.read_sql_query("SELECT customer_name, phone, amount, status FROM dues WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📊 এক্সেল ফাইল ডাউনলোড (Excel)")
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df_sales.to_excel(writer, sheet_name='Sales', index=False)
-                df_exp.to_excel(writer, sheet_name='Expenses', index=False)
-                df_dues.to_excel(writer, sheet_name='Dues Records', index=False)
-            excel_buffer.seek(0)
-            
-            st.download_button(
-                label=f"🟢 ডাউনলোড {filter_option} এর এক্সেল",
-                data=excel_buffer,
-                file_name=f"Report_{start_date}_to_{end_date}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        with col2:
-            st.subheader("📄 পিডিএফ ফাইল ডাউনলোড (PDF)")
-            master_pdf = generate_master_pdf(
-                df_sales.values.tolist(),
-                df_exp.values.tolist(),
-                pd.read_sql_query("SELECT ngo_name, total_loan, paid_loan, date FROM loans", conn).values.tolist(),
-                start_date,
-                end_date
-            )
-            
-            st.download_button(
-                label=f"🔴 ডাউনলোড {filter_option} এর পিডিএফ",
-                data=master_pdf,
-                file_name=f"Report_{start_date}_to_{end_date}.pdf",
-                mime="application/pdf"
-            )
+        filter_option = st.selectbox("সময়সীমা সিলেক্ট করুন", ["আজকের হিসাব", "গত ৩ দিন", "গত ৭ দিন", "গত ৩০ দিন"])
