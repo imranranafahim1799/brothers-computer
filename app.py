@@ -15,7 +15,7 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT, amount REAL, date TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, amount REAL, date TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, ngo_name TEXT, total_loan REAL, paid_loan REAL, date TEXT)''')
-    # New Premium Tables
+    # Premium Tables
     cursor.execute('''CREATE TABLE IF NOT EXISTS dues (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_name TEXT, phone TEXT, amount REAL, status TEXT, date TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock (id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT, qty INTEGER, min_limit INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS staff (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_name TEXT, salary REAL, advance REAL)''')
@@ -68,10 +68,15 @@ else:
         st.session_state['logged_in'] = False
         st.rerun()
 
+    # Session State for Cart & Receipts
+    if 'cart' not in st.session_state:
+        st.session_state['cart'] = []
+    if 'last_receipt' not in st.session_state:
+        st.session_state['last_receipt'] = None
+
     # --- 1. Dashboard & Charts ---
     if menu == "🏠 ড্যাশবোর্ড ও গ্রাফ চার্ট":
         st.title("🏠 বিজনেস ওভারভিউ ড্যাশবোর্ড")
-        
         current_date = datetime.today().strftime('%Y-%m-%d')
         target_date = st.text_input("তারিখ দিয়ে হিসাব দেখুন (YYYY-MM-DD):", current_date)
         
@@ -92,39 +97,128 @@ else:
         
         st.write("---")
         st.subheader("📈 আয়ের খাতসমূহের গ্রাফিক্যাল চার্ট")
-        
         df_chart_sales = pd.read_sql_query("SELECT item AS 'Category', SUM(amount) AS 'Total_Tk' FROM sales GROUP BY item", conn)
         if not df_chart_sales.empty:
             st.bar_chart(df_chart_sales.set_index('Category'))
         else:
-            st.info("চার্ট দেখানোর মতো কোনো বিক্রির ডাটা এখনো নেই।")
+            st.info("চার্ট দেখানোর মতো কোনো বিক্রির ডাটা নেই।")
 
-    # --- 2. Sales & Receipts ---
+    # --- 2. Sales & Receipts (FIXED FOR MULTIPLE ITEMS) ---
     elif menu == "💰 বিক্রি ও রসিদ (Sales)":
-        st.title("💰 নতুন বিক্রি ও ডিজিটাল রসিদ")
-        options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনলাইন কাজ", "NID সার্ভিস", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "অন্যান্য"]
-        item = st.selectbox("কাজের ধরন", options)
-        amount = st.number_input("টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
-        c_name = st.text_input("কাস্টমারের নাম (রসিদের জন্য ঐচ্ছিক)")
+        st.title("💰 নতুন বিক্রি ও মাল্টিপল আইটেম রসিদ")
         
-        if st.button("বিক্রি সংরক্ষণ করুন"):
-            if amount > 0:
-                today = datetime.today().strftime('%Y-%m-%d')
-                cursor.execute("INSERT INTO sales (item, amount, date) VALUES (?, ?, ?)", (item, amount, today))
-                
-                # Auto deduct stock for photocopy/print
-                if item in ["ফটোকপি", "প্রিন্ট"]:
-                    cursor.execute("UPDATE stock SET qty = qty - 1 WHERE item_name='A4 Paper Rim'")
-                
-                conn.commit()
-                st.success(f"{item} বাবদ ৳{amount} সংরক্ষিত হয়েছে।")
-                
-                # Printable Receipt Preview
+        col_form, col_receipt = st.columns([1, 1])
+        
+        with col_form:
+            st.subheader("🛒 কাস্টমারের কাজের তালিকা তৈরি করুন")
+            c_name = st.text_input("কাস্টমারের নাম (ঐচ্ছিক)", key="customer_name_input")
+            
+            options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনলাইন কাজ", "NID সার্ভিস", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "অন্যান্য"]
+            item = st.selectbox("কাজের ধরন সিলেক্ট করুন", options)
+            amount = st.number_input("এই কাজের টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
+            
+            if st.button("➕ এই কাজটি তালিকায় যোগ করুন"):
+                if amount > 0:
+                    st.session_state['cart'].append({"item": item, "amount": amount})
+                    st.success(f"✓ {item} (৳ {amount}) তালিকায় যোগ হয়েছে।")
+                else:
+                    st.error("টাকার পরিমাণ ০ থেকে বেশি হতে হবে।")
+            
+            # Show Current Cart contents
+            if st.session_state['cart']:
                 st.write("---")
-                st.subheader("🧾 ডিজিটাল ক্যাশ মেমো (রসিদ)")
-                st.info(f"**Brothers Computer**\n\nCustomer: {c_name if c_name else 'Valued Customer'}\nWork: {item}\nTotal Amount: ৳ {amount}\nDate: {today}\n\nThank you for coming!")
-                st.stb = st.button("নতুন এন্ট্রি করুন")
-                st.rerun()
+                st.write("**এই কাস্টমারের চলতি কাজের তালিকা:**")
+                for idx, cart_item in enumerate(st.session_state['cart']):
+                    st.write(f"{idx+1}. {cart_item['item']} — ৳ {cart_item['amount']}")
+                
+                if st.button("❌ তালিকাটি মুছে ফেলুন (Clear Cart)"):
+                    st.session_state['cart'] = []
+                    st.rerun()
+                
+                st.write("---")
+                if st.button("💾 সব মিলিয়ে রসিদ তৈরি ও সেভ করুন", type="primary"):
+                    today = datetime.today().strftime('%Y-%m-%d')
+                    total_bill = 0
+                    items_summary = []
+                    
+                    for cart_item in st.session_state['cart']:
+                        cursor.execute("INSERT INTO sales (item, amount, date) VALUES (?, ?, ?)", (cart_item['item'], cart_item['amount'], today))
+                        total_bill += cart_item['amount']
+                        items_summary.append(cart_item)
+                        
+                        # Auto stock reduction
+                        if cart_item['item'] in ["ফটোকপি", "প্রিন্ট"]:
+                            cursor.execute("UPDATE stock SET qty = max(0, qty - 1) WHERE item_name='A4 Paper Rim'")
+                    
+                    conn.commit()
+                    
+                    st.session_state['last_receipt'] = {
+                        "name": c_name if c_name else "Valued Customer",
+                        "items": items_summary,
+                        "total": total_bill,
+                        "date": today
+                    }
+                    st.session_state['cart'] = [] # Clear cart after save
+                    st.success("✓ সকল হিসাব একসাথে ডাটাবেজে সংরক্ষণ করা হয়েছে!")
+                    st.rerun()
+        
+        with col_receipt:
+            st.subheader("🧾 ডিজিটাল ক্যাش মেমো (রসিদ)")
+            if st.session_state['last_receipt']:
+                rcpt = st.session_state['last_receipt']
+                
+                # HTML Receipt Layout
+                items_html = "".join([f"<tr><td style='padding:5px 0;'>• {i['item']}</td><td style='text-align:right; padding:5px 0;'>৳ {i['amount']}</td></tr>" for i in rcpt['items']])
+                
+                st.markdown(f"""
+                <div style="background-color: #f8fafc; border: 2px dashed #cbd5e1; padding: 25px; border-radius: 8px; font-family: sans-serif; color: #1e293b; max-width: 400px; margin: auto;">
+                    <h3 style="text-align: center; margin-top: 0; color: #1e3a8a; margin-bottom: 5px;">🖥️ BROTHERS COMPUTER</h3>
+                    <p style="text-align: center; font-size: 11px; color: #64748b; margin-top: 0; margin-bottom: 15px;">ডিজিটাল ক্যাশ মেমো</p>
+                    <hr style="border: 0; border-top: 1px dashed #cbd5e1;">
+                    <p style="font-size: 13px; margin: 5px 0;"><b>তারিখ:</b> {rcpt['date']}</p>
+                    <p style="font-size: 13px; margin: 5px 0;"><b>কাস্টমার:</b> {rcpt['name']}</p>
+                    <hr style="border: 0; border-top: 1px dashed #cbd5e1;">
+                    <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                        <tr style="border-bottom: 1px solid #e2e8f0; color:#475569;">
+                            <th style="text-align: left; padding-bottom: 5px;">কাজের বিবরণ</th>
+                            <th style="text-align: right; padding-bottom: 5px;">টাকা</th>
+                        </tr>
+                        {items_html}
+                    </table>
+                    <hr style="border: 0; border-top: 1px dashed #cbd5e1;">
+                    <table style="width: 100%;">
+                        <tr>
+                            <td><h3 style="margin: 0; color: #0f172a;">সর্বমোট বিল:</h3></td>
+                            <td style="text-align: right;"><h3 style="margin: 0; color: #1e3a8a;">৳ {rcpt['total']}</h3></td>
+                        </tr>
+                    </table>
+                    <p style="font-size: 11px; color: #10b981; margin-top: 5px; font-weight: bold;">● পরিশোধিত (Paid)</p>
+                    <hr style="border: 0; border-top: 1px dashed #cbd5e1;">
+                    <p style="text-align: center; font-size: 12px; margin-bottom: 0; color: #475569; font-style: italic;">ধন্যবাদ, আবার আসবেন!</p>
+                </div>
+                """, unsafe_html=True)
+                
+                if st.button("নতুন কাস্টমারের জন্য ফ্রেশ এন্ট্রি করুন"):
+                    st.session_state['last_receipt'] = None
+                    st.rerun()
+            else:
+                st.info("কাজের তালিকা তৈরি করে সেভ বাটনে চাপ দিলে এখানে একীভূত মেমো রসিদ দেখতে পাবেন।")
+                
+        st.write("---")
+        st.subheader("📋 আজকের বিক্রির তালিকা")
+        today_date = datetime.today().strftime('%Y-%m-%d')
+        df_today_sales = pd.read_sql_query("SELECT id, item, amount FROM sales WHERE date=?", conn, params=(today_date,))
+        
+        if not df_today_sales.empty:
+            for index, row in df_today_sales.iterrows():
+                col_text, col_btn = st.columns([5, 1])
+                col_text.write(f"🔹 {row['item']} - ৳ {row['amount']}")
+                if col_btn.button(f"❌ Delete", key=f"del_sale_{row['id']}"):
+                    cursor.execute("DELETE FROM sales WHERE id=?", (int(row['id']),))
+                    conn.commit()
+                    st.rerun()
+        else:
+            st.info("আজকে এখনও কোনো বিক্রি এন্ট্রি করা হয়নি।")
 
     # --- 3. Dues Ledger ---
     elif menu == "📝 কাস্টমার বাকি খাতা (Dues)":
@@ -152,7 +246,6 @@ else:
                 c1.error(f"🔴 {row['Name']} ({row['Phone']}) -> বাকি: ৳ {row['Due Tk']}")
                 if c2.button(f"টাকা আদায় হয়েছে", key=f"pay_due_{row['id']}"):
                     cursor.execute("UPDATE dues SET status='Paid' WHERE id=?", (int(row['id']),))
-                    # Add to sales
                     today = datetime.today().strftime('%Y-%m-%d')
                     cursor.execute("INSERT INTO sales (item, amount, date) VALUES ('বাকি আদায়', ?, ?)", (row['Due Tk'], today))
                     conn.commit()
@@ -164,7 +257,6 @@ else:
     # --- 4. Expenses & Staff ---
     elif menu == "💸 খরচ ও স্টাফ (Expense)":
         st.title("💸 খরচ ও স্টাফ ম্যানেজমেন্ট")
-        
         tab1, tab2 = st.tabs(["দোকান খরচ", "স্টাফ বেতন ও অ্যাডভান্স"])
         
         with tab1:
@@ -202,8 +294,6 @@ else:
     # --- 5. Stock Management ---
     elif menu == "📦 কাগজ ও কালি স্টক (Stock)":
         st.title("📦 মালামাল ও ইনভেন্টরি স্টক")
-        st.write("ফটোকপি এবং প্রিন্ট সেভ করার সাথে সাথে এখান থেকে ১ রিম করে কাগজ অটোমেটিক মাইনাস হবে।")
-        
         cursor.execute("SELECT item_name, qty, min_limit FROM stock")
         stocks = cursor.fetchall()
         
@@ -247,8 +337,6 @@ else:
     # --- 7. Cash Closing ---
     elif menu == "🧮 দৈনিক ক্যাশ ক্লোজিং":
         st.title("🧮 দৈনিক ক্যাশ ক্যালকুলেটর ও ক্লোজিং")
-        st.write("সারাদিন শেষে ড্রয়ারের ক্যাশ টাকার সাথে সফটওয়্যারের হিসাব এখানে মিলিয়ে নিন:")
-        
         n500 = st.number_input("৫০০ টাকার নোট (পিস)", min_value=0, step=1)
         n100 = st.number_input("১০০ টাকার নোট (পিস)", min_value=0, step=1)
         n50 = st.number_input("৫০ টাকার নোট (পিস)", min_value=0, step=1)
@@ -266,7 +354,6 @@ else:
         expected_cash = ts - te
         
         st.write(f"📊 সফটওয়্যার অনুযায়ী আজকে ক্যাশে থাকার কথা: **৳ {expected_cash}**")
-        
         if total_cash == expected_cash:
             st.success("🟢 চমৎকার! হাতের ক্যাশ এবং সফটওয়্যারের হিসাব একদম মিলে গেছে।")
         elif total_cash > expected_cash:
@@ -277,7 +364,6 @@ else:
     # --- 8. Download & Export ---
     elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
         st.title("💾 মাস্টার রিপোর্ট ডাউনলোড প্যানেল")
-        
         df_sales = pd.read_sql_query("SELECT date, item, amount FROM sales", conn)
         df_exp = pd.read_sql_query("SELECT date, category, amount FROM expenses", conn)
         df_dues = pd.read_sql_query("SELECT customer_name, phone, amount, status FROM dues", conn)
