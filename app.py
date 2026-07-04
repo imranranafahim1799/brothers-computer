@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -39,7 +39,7 @@ conn, cursor = init_db()
 def clean_for_pdf(text):
     mapping = {
         "ফটোকপি": "Photocopy", "প্রিন্ট": "Print", "কম্পোজ": "Compose", 
-        "অনলাইন কাজ": "Online Work", "NID সার্ভিস": "NID Service", "জন্ম নিবন্ধন": "Birth Reg", 
+        "অনлайн কাজ": "Online Work", "NID সার্ভিস": "NID Service", "জন্ম নিবন্ধন": "Birth Reg", 
         "ছবি": "Photo", "ল্যামিনেশন": "Lamination", "অন্যান্য": "Others", "বাকি আদায়": "Due Collected",
         "দোকান ভাড়া": "Shop Rent", "বিদ্যুৎ বিল": "Electricity Bill", 
         "ইন্টারনেট বিল": "Internet Bill", "চা-নাস্তা": "Tea-Snacks", "কাগজ/কালি ক্রয়": "Buy Stock",
@@ -47,29 +47,77 @@ def clean_for_pdf(text):
     }
     return mapping.get(str(text), str(text))
 
-# --- Helper Function: Generate All-in-One PDF ---
-def generate_master_pdf(sales_rows, expense_rows, loan_rows):
+# --- Helper Function: Generate Single Receipt PDF ---
+def generate_receipt_pdf(rcpt):
+    buffer = io.BytesIO()
+    # Compact size for customer receipt (Width: 300 points, dynamic height)
+    doc = SimpleDocTemplate(buffer, pagesize=(300, 480), rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('RTitle', parent=styles['Heading2'], fontSize=15, leading=18, alignment=1, textColor=colors.HexColor('#1E3A8A'))
+    sub_style = ParagraphStyle('RSub', parent=styles['Normal'], fontSize=8.5, leading=11, alignment=1, textColor=colors.HexColor('#475569'))
+    meta_style = ParagraphStyle('RMeta', parent=styles['Normal'], fontSize=8.5, leading=11, alignment=1, textColor=colors.gray)
+    text_style = ParagraphStyle('RText', parent=styles['Normal'], fontSize=10, leading=14)
+    bold_text = ParagraphStyle('RBold', parent=styles['Normal'], fontSize=10, leading=14, fontName="Helvetica-Bold")
+    right_bold = ParagraphStyle('RRightBold', parent=styles['Normal'], fontSize=12, leading=16, fontName="Helvetica-Bold", alignment=2, textColor=colors.HexColor('#1E3A8A'))
+    
+    # Store Header Info (Address & Phone Fixed)
+    story.append(Paragraph("<b>BROTHERS COMPUTER</b>", title_style))
+    story.append(Paragraph("Shimantabazar, Kazipur, Sirajganj", sub_style))
+    story.append(Paragraph("Mob: 01644-693874, 01880-813373", sub_style))
+    story.append(Paragraph("<i>Digital Cash Memo</i>", meta_style))
+    story.append(Spacer(1, 10))
+    
+    story.append(Paragraph(f"<b>Date:</b> {rcpt['date']}", text_style))
+    story.append(Paragraph(f"<b>Customer:</b> {rcpt['name']}", text_style))
+    story.append(Spacer(1, 5))
+    
+    # Table Header
+    data = [[Paragraph("<b>Description</b>", bold_text), Paragraph("<b>Amount</b>", bold_text)]]
+    for i in rcpt['items']:
+        data.append([Paragraph(clean_for_pdf(i['item']), text_style), Paragraph(f"Tk {i['amount']}", text_style)])
+        
+    t = Table(data, colWidths=[180, 90])
+    t.setStyle(TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.HexColor('#0F172A')),
+        ('LINEBELOW', (0,1), (-1,-1), 0.5, colors.lightgrey),
+        ('PADDING', (0,0), (-1,-1), 4),
+        ('ALIGN', (1,0), (1,-1), 'RIGHT')
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+    
+    story.append(Paragraph(f"Total Bill: Tk {rcpt['total']}", right_bold))
+    story.append(Paragraph("<font color='#10b981'><b>● Paid</b></font>", text_style))
+    story.append(Spacer(1, 15))
+    story.append(Paragraph("<i>Thank you, visit again!</i>", meta_style))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+# --- Helper Function: Generate All-in-One Report PDF ---
+def generate_master_pdf(sales_rows, expense_rows, loan_rows, start_d, end_d):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     story = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, leading=24, textColor=colors.HexColor('#1E3A8A'), alignment=1)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'), alignment=1)
     meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.gray, alignment=1)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, leading=18, textColor=colors.HexColor('#0F172A'), spaceBefore=15, spaceAfter=8)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=12, leading=16, textColor=colors.HexColor('#0F172A'), spaceBefore=12, spaceAfter=6)
     cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=9, leading=11)
     
-    # Header
     story.append(Paragraph("<b>Brothers Computer Management System</b>", title_style))
-    story.append(Paragraph(f"All-in-One Master Report | Generated on: {datetime.today().strftime('%Y-%m-%d %H:%M')}", meta_style))
+    story.append(Paragraph("Shimantabazar, Kazipur, Sirajganj | Mob: 01644-693874", meta_style))
+    story.append(Paragraph(f"Report Period: {start_d} to {end_d} | Generated: {datetime.today().strftime('%Y-%m-%d')}", meta_style))
     story.append(Spacer(1, 15))
     
-    # Common Table Styler
     t_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#E2E8F0')),
-        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F8FAFC')])
@@ -77,33 +125,21 @@ def generate_master_pdf(sales_rows, expense_rows, loan_rows):
 
     # 1. Sales Table
     story.append(Paragraph("<b>1. Sales Records</b>", section_style))
-    sales_headers = ["Date", "Item", "Amount (Tk)"]
-    sales_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in sales_headers]]
+    sales_data = [[Paragraph("<b>Date</b>", cell_style), Paragraph("<b>Item</b>", cell_style), Paragraph("<b>Amount (Tk)</b>", cell_style)]]
     for row in sales_rows:
-        sales_data.append([Paragraph(clean_for_pdf(item), cell_style) for item in row])
+        sales_data.append([Paragraph(str(row[0]), cell_style), Paragraph(clean_for_pdf(row[1]), cell_style), Paragraph(str(row[2]), cell_style)])
     t1 = Table(sales_data, colWidths=[doc.width/3]*3)
     t1.setStyle(t_style)
     story.append(t1)
     
     # 2. Expense Table
     story.append(Paragraph("<b>2. Expense Records</b>", section_style))
-    exp_headers = ["Date", "Category", "Amount (Tk)"]
-    exp_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in exp_headers]]
+    exp_data = [[Paragraph("<b>Date</b>", cell_style), Paragraph("<b>Category</b>", cell_style), Paragraph("<b>Amount (Tk)</b>", cell_style)]]
     for row in expense_rows:
-        exp_data.append([Paragraph(clean_for_pdf(item), cell_style) for item in row])
+        exp_data.append([Paragraph(str(row[0]), cell_style), Paragraph(clean_for_pdf(row[1]), cell_style), Paragraph(str(row[2]), cell_style)])
     t2 = Table(exp_data, colWidths=[doc.width/3]*3)
     t2.setStyle(t_style)
     story.append(t2)
-    
-    # 3. Loan Table
-    story.append(Paragraph("<b>3. Loan Records</b>", section_style))
-    loan_headers = ["NGO Name", "Total Loan", "Paid Loan", "Last Update"]
-    loan_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in loan_headers]]
-    for row in loan_rows:
-        loan_data.append([Paragraph(clean_for_pdf(item), cell_style) for item in row])
-    t3 = Table(loan_data, colWidths=[doc.width/4]*4)
-    t3.setStyle(t_style)
-    story.append(t3)
     
     doc.build(story)
     buffer.seek(0)
@@ -146,7 +182,6 @@ else:
         st.session_state['logged_in'] = False
         st.rerun()
 
-    # Session State for Cart & Receipts
     if 'cart' not in st.session_state:
         st.session_state['cart'] = []
     if 'last_receipt' not in st.session_state:
@@ -188,9 +223,9 @@ else:
         
         with col_form:
             st.subheader("🛒 কাস্টমারের কাজের তালিকা তৈরি করুন")
-            c_name = st.text_input("קাস্টমারের নাম (ঐচ্ছিক)", key="customer_name_input")
+            c_name = st.text_input("কাস্টমারের নাম (ঐচ্ছিক)", key="customer_name_input")
             
-            options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনলাইন কাজ", "NID সার্ভিস", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "অন্যান্য"]
+            options = ["ফটোকপি", "প্রিন্ট", "কম্পোজ", "অনлайн কাজ", "NID সার্ভিস", "জন্ম নিবন্ধন", "ছবি", "ল্যামিনেশন", "অন্যান্য"]
             item = st.selectbox("কাজের ধরন সিলেক্ট করুন", options)
             amount = st.number_input("এই কাজের টাকার পরিমাণ (৳)", min_value=0.0, step=10.0)
             
@@ -242,7 +277,11 @@ else:
             if st.session_state['last_receipt']:
                 rcpt = st.session_state['last_receipt']
                 
+                # Screen Visual Receipt View
                 st.markdown("### 🖥️ BROTHERS COMPUTER")
+                st.caption("📍 সিমান্তবাজার, কাজিপুর, সিরাজগঞ্জ।")
+                st.caption("📞 মোবাইল: ০১৬৪৪-৬৯৩৮৭৪, ০১৮৮০-৮১৩৩৭৩")
+                st.write("---")
                 st.write(f"**তারিখ:** {rcpt['date']} | **কাস্টমার:** {rcpt['name']}")
                 st.write("---")
                 for i in rcpt['items']:
@@ -251,11 +290,20 @@ else:
                 st.markdown(f"### **সর্বমোট বিল: ৳ {rcpt['total']}**")
                 st.success("● পরিশোধিত (Paid)")
                 
+                # Generate and offer PDF Download
+                receipt_pdf_data = generate_receipt_pdf(rcpt)
+                st.download_button(
+                    label="🧾 ডাউনলোড করুন রসিদ (PDF প্রিন্ট)",
+                    data=receipt_pdf_data,
+                    file_name=f"Receipt_{rcpt['date']}.pdf",
+                    mime="application/pdf"
+                )
+                
                 if st.button("নতুন কাস্টমারের জন্য ফ্রেশ এন্ট্রি করুন"):
                     st.session_state['last_receipt'] = None
                     st.rerun()
             else:
-                st.info("কাজের তালিকা তৈরি করে সেভ বাটনে চাপ দিলে এখানে একীভূত মেমো রসিদ দেখতে পাবেন।")
+                st.info("কাজের তালিকা তৈরি করে সেভ বাটনে চাপ দিলে এখানে ঠিকানা ও মোবাইল নম্বর সহ একীভূত মেমো রসিদ দেখতে পাবেন।")
                 
         st.write("---")
         st.subheader("📋 আজকের বিক্রির তালিকা")
@@ -368,7 +416,7 @@ else:
             st.rerun()
 
     # --- 6. Loan Manager ---
-    elif menu == "🏦 লোন管理器 (Loans)":
+    elif menu == "🏦 লোন ম্যানেজার (Loans)":
         st.title("🏦 এনজিও লোন ও কিস্তি ম্যানেজার")
         col1, col2, col3 = st.columns(3)
         ngo = col1.text_input("এনজিওর নাম (English)")
@@ -414,19 +462,40 @@ else:
         else:
             st.error(f"🔴 ক্যাশে ৳ {expected_cash - total_cash} টাকা কম আছে! হিসাব চেক করুন।")
 
-    # --- 8. Download & Export (FIXED WITH PDF BUTTON) ---
+    # --- 8. Download & Export ---
     elif menu == "💾 ডাউনলোড ও এক্সপোর্ট":
-        st.title("💾 মাস্টার রিপোর্ট ডাউনলোড প্যানেল")
+        st.title("💾 ফিল্টারড ক্যাশ রিপোর্ট ডাউনলোড প্যানেল")
         st.write("---")
+        
+        st.subheader("📅 আপনি কতদিনের রিপোর্ট ডাউনলোড করতে চান?")
+        filter_option = st.selectbox("সময়সীমা সিলেক্ট করুন", ["আজকের হিসাব", "গত ৩ দিন", "গত ৭ দিন", "গত ৩০ দিন", "নির্দিষ্ট তারিখ সেট করুন (Custom Range)"])
+        
+        today_dt = datetime.today()
+        start_date = today_dt.strftime('%Y-%m-%d')
+        end_date = today_dt.strftime('%Y-%m-%d')
+        
+        if filter_option == "গত ৩ দিন":
+            start_date = (today_dt - timedelta(days=2)).strftime('%Y-%m-%d')
+        elif filter_option == "গত ৭ দিন":
+            start_date = (today_dt - timedelta(days=6)).strftime('%Y-%m-%d')
+        elif filter_option == "গত ৩০ দিন":
+            start_date = (today_dt - timedelta(days=29)).strftime('%Y-%m-%d')
+        elif filter_option == "নির্দিষ্ট তারিখ সেট করুন (Custom Range)":
+            c_start = st.date_input("শুরুর তারিখ (Start Date)", today_dt - timedelta(days=7))
+            c_end = st.date_input("শেষের তারিখ (End Date)", today_dt)
+            start_date = c_start.strftime('%Y-%m-%d')
+            end_date = c_end.strftime('%Y-%m-%d')
+            
+        st.info(f"📍 বর্তমানে **{start_date}** থেকে **{end_date}** তারিখের ডাটা প্রсеস করা হচ্ছে।")
+        
+        df_sales = pd.read_sql_query("SELECT date, item, amount FROM sales WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
+        df_exp = pd.read_sql_query("SELECT date, category, amount FROM expenses WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
+        df_dues = pd.read_sql_query("SELECT customer_name, phone, amount, status FROM dues WHERE date BETWEEN ? AND ?", conn, params=(start_date, end_date))
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("📊 অল-ইন-ওয়ান এক্সেল ফাইল")
-            df_sales = pd.read_sql_query("SELECT date, item, amount FROM sales", conn)
-            df_exp = pd.read_sql_query("SELECT date, category, amount FROM expenses", conn)
-            df_dues = pd.read_sql_query("SELECT customer_name, phone, amount, status FROM dues", conn)
-            
+            st.subheader("📊 এক্সেল ফাইল ডাউনলোড (Excel)")
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_sales.to_excel(writer, sheet_name='Sales', index=False)
@@ -435,24 +504,25 @@ else:
             excel_buffer.seek(0)
             
             st.download_button(
-                label="🟢 ডাউনলোড মাস্টার এক্সেল (Excel)",
+                label=f"🟢 ডাউনলোড {filter_option} এর এক্সেল",
                 data=excel_buffer,
-                file_name="Brothers_Computer_Ultimate_Report.xlsx",
+                file_name=f"Report_{start_date}_to_{end_date}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
         with col2:
-            st.subheader("📄 অল-ইন-ওয়ান পিডিএফ ফাইল")
-            
+            st.subheader("📄 পিডিএফ ফাইল ডাউনলোড (PDF)")
             master_pdf = generate_master_pdf(
-                pd.read_sql_query("SELECT date, item, amount FROM sales", conn).values.tolist(),
-                pd.read_sql_query("SELECT date, category, amount FROM expenses", conn).values.tolist(),
-                pd.read_sql_query("SELECT ngo_name, total_loan, paid_loan, date FROM loans", conn).values.tolist()
+                df_sales.values.tolist(),
+                df_exp.values.tolist(),
+                pd.read_sql_query("SELECT ngo_name, total_loan, paid_loan, date FROM loans", conn).values.tolist(),
+                start_date,
+                end_date
             )
             
             st.download_button(
-                label="🔴 ডাউনলোড মাস্টার পিডিএফ (PDF)",
+                label=f"🔴 ডাউনলোড {filter_option} এর পিডিএফ",
                 data=master_pdf,
-                file_name="Brothers_Computer_Master_Report.pdf",
+                file_name=f"Report_{start_date}_to_{end_date}.pdf",
                 mime="application/pdf"
             )
